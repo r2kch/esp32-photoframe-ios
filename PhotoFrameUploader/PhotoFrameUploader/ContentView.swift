@@ -11,21 +11,52 @@ struct ContentView: View {
     @State private var isError: Bool = false
     @State private var isUploading: Bool = false
     @State private var displayNow: Bool = false
+    @State private var albums: [AlbumItem] = []
+    @AppStorage("photoframeAlbum") private var selectedAlbum: String = "Default"
+    @State private var albumError: String?
+    @State private var isLoadingAlbums: Bool = false
+    @State private var isAlbumPickerPresented: Bool = false
 
     private let uploader = UploadService()
 
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 18) {
-                    header
-                    deviceCard
-                    photoCard
-                    actionsCard
-                }
-                .padding(18)
+            TabView {
+                picturesTab
+                    .tabItem {
+                        Label("Pictures", systemImage: "camera")
+                    }
+                settingsTab
+                    .tabItem {
+                        Label("Settings", systemImage: "gearshape")
+                    }
             }
             .navigationTitle("PhotoFrame")
+        }
+    }
+
+    private var picturesTab: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                header
+                photoCard
+                displayCard
+                albumCard
+                actionsCard
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var settingsTab: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                deviceCard
+                aboutCard
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -48,9 +79,38 @@ struct ContentView: View {
                 .textInputAutocapitalization(.never)
                 .keyboardType(.URL)
                 .textFieldStyle(.roundedBorder)
+        }
+        .cardStyle()
+    }
+
+    private var displayCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Display")
+                .font(.headline)
             Toggle("Display immediately", isOn: $displayNow)
         }
         .cardStyle()
+        .frame(maxWidth: .infinity)
+    }
+
+    private var aboutCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("About")
+                .font(.headline)
+            Text("This app is a companion for `aitjcize/esp32-photoframe` (https://github.com/aitjcize/esp32-photoframe) running on the Waveshare ESP32-S3-PhotoPainter.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+            Text("The PhotoFrame firmware must be installed and connected to Wi-Fi as described in the vendor's GitHub instructions. To keep the device online, it should be powered via USB-C.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+            Text("Disclaimer")
+                .font(.headline)
+            Text("This app is provided “as is,” without warranties of any kind. Use at your own risk. Apple, aitjcize, and r2kch are not responsible for any device behavior, data loss, or damages arising from its use.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+        .cardStyle()
+        .frame(maxWidth: .infinity)
     }
 
     private var photoCard: some View {
@@ -81,6 +141,7 @@ struct ContentView: View {
             }
         }
         .cardStyle()
+        .frame(maxWidth: .infinity)
         .onChange(of: selectedItem) { newValue in
             guard let newValue else { return }
             Task {
@@ -117,6 +178,58 @@ struct ContentView: View {
             }
         }
         .cardStyle()
+        .frame(maxWidth: .infinity)
+    }
+
+    private var albumCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Album")
+                .font(.headline)
+            if isLoadingAlbums {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text("Loading albums...")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                Button {
+                    Task {
+                        await loadAlbumsIfNeeded()
+                        await MainActor.run {
+                            isAlbumPickerPresented = true
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(selectedAlbum.isEmpty ? "Default" : selectedAlbum)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .foregroundColor(.secondary)
+                    }
+                    .font(.body)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(10)
+                }
+            }
+
+            if let albumError {
+                Text(albumError)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+            }
+        }
+        .cardStyle()
+        .confirmationDialog("Select Album", isPresented: $isAlbumPickerPresented, titleVisibility: .visible) {
+            ForEach(currentAlbums, id: \.name) { album in
+                Button(album.name) {
+                    selectedAlbum = album.name
+                }
+            }
+        }
     }
 
     private func loadImage(from item: PhotosPickerItem) async {
@@ -162,9 +275,10 @@ struct ContentView: View {
             await MainActor.run {
                 statusMessage = "Uploading..."
             }
+            let targetAlbum = resolveUploadAlbum()
             let outcome = try await uploader.upload(
                 host: host,
-                album: "Default",
+                album: targetAlbum,
                 processingMode: "enhanced",
                 imageData: payload.fullJPEG,
                 thumbData: payload.thumbJPEG,
@@ -186,11 +300,54 @@ struct ContentView: View {
         }
     }
 
+    private func resolveUploadAlbum() -> String {
+        let trimmed = selectedAlbum.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return "Default"
+        }
+        if albums.isEmpty && trimmed != "Default" {
+            return "Default"
+        }
+        return trimmed
+    }
+
+    private func loadAlbumsIfNeeded() async {
+        if isLoadingAlbums || !albums.isEmpty {
+            return
+        }
+        await MainActor.run {
+            isLoadingAlbums = true
+            albumError = nil
+        }
+        do {
+            let fetched = try await uploader.fetchAlbums(host: host)
+            await MainActor.run {
+                albums = fetched
+                if selectedAlbum.isEmpty, let first = fetched.first?.name {
+                    selectedAlbum = first
+                }
+                isLoadingAlbums = false
+            }
+        } catch {
+            await MainActor.run {
+                albumError = "Could not load albums. \(error.localizedDescription)"
+                isLoadingAlbums = false
+            }
+        }
+    }
+
+    private var currentAlbums: [AlbumItem] {
+        if albums.isEmpty {
+            return [AlbumItem(name: "Default", enabled: nil)]
+        }
+        return albums
+    }
 }
 
 private struct CardModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
             .background(Color(.systemBackground))
             .cornerRadius(18)

@@ -6,6 +6,11 @@ struct UploadResponse: Decodable {
     let message: String?
 }
 
+struct AlbumItem: Decodable {
+    let name: String
+    let enabled: Bool?
+}
+
 struct ImageListItem: Decodable {
     let name: String
 }
@@ -38,6 +43,20 @@ enum UploadError: LocalizedError {
 }
 
 struct UploadService {
+    func fetchAlbums(host: String) async throws -> [AlbumItem] {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        let url = try makeURL(host: sanitizedHost, path: "/api/albums")
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            throw UploadError.network("Albums request failed: HTTP \(httpResponse.statusCode)")
+        }
+        let decoder = JSONDecoder()
+        return try decoder.decode([AlbumItem].self, from: data)
+    }
+
     func upload(
         host: String,
         album: String,
@@ -93,12 +112,10 @@ struct UploadService {
             guard displayResult.status == "success" else {
                 throw UploadError.server(displayResult.message ?? "Display failed.")
             }
-            let status = buildStatus(verified: verified, overwriteRisk: overwriteRisk)
-            return UploadOutcome(message: "Upload complete. Image is being displayed.\(status)", filename: filename, verified: verified, overwriteRisk: overwriteRisk)
+            return UploadOutcome(message: "Upload complete. Image is being displayed.", filename: filename, verified: verified, overwriteRisk: overwriteRisk)
         }
 
-        let status = buildStatus(verified: verified, overwriteRisk: overwriteRisk)
-        return UploadOutcome(message: "Upload complete.\(status)", filename: filename, verified: verified, overwriteRisk: overwriteRisk)
+        return UploadOutcome(message: "Upload complete.", filename: filename, verified: verified, overwriteRisk: overwriteRisk)
     }
 
     private func makeURL(host: String, path: String) throws -> URL {
@@ -132,16 +149,6 @@ struct UploadService {
         }
         let decoder = JSONDecoder()
         return try decoder.decode([ImageListItem].self, from: data)
-    }
-
-    private func buildStatus(verified: Bool, overwriteRisk: Bool) -> String {
-        if verified && overwriteRisk {
-            return " Warning: filename already existed in Default."
-        }
-        if verified {
-            return " Verified in Default."
-        }
-        return " Verification unavailable."
     }
 
     private func buildMultipartBody(
