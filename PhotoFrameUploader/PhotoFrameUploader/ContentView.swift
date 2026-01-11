@@ -170,17 +170,9 @@ struct ContentView: View {
                 thumbData: payload.thumbJPEG,
                 displayNow: displayNow
             )
-            do {
-                try await saveToLibrary(image)
-                await MainActor.run {
-                    statusMessage = "\(outcome.message) Saved to Photos."
-                    isError = false
-                }
-            } catch {
-                await MainActor.run {
-                    statusMessage = "\(outcome.message) Photo save failed: \(error.localizedDescription)"
-                    isError = true
-                }
+            await MainActor.run {
+                statusMessage = outcome.message
+                isError = false
             }
         } catch {
             await MainActor.run {
@@ -194,25 +186,6 @@ struct ContentView: View {
         }
     }
 
-    private func saveToLibrary(_ image: UIImage) async throws {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
-        guard status == .authorized || status == .limited else {
-            throw UploadError.processing("Photos permission denied.")
-        }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            PHPhotoLibrary.shared().performChanges({
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
-            }) { success, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else if success {
-                    continuation.resume(returning: ())
-                } else {
-                    continuation.resume(throwing: UploadError.processing("Could not save photo."))
-                }
-            }
-        }
-    }
 }
 
 private struct CardModifier: ViewModifier {

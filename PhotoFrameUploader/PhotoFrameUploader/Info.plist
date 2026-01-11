@@ -43,8 +43,6 @@
   </array>
   <key>NSPhotoLibraryUsageDescription</key>
   <string>Select photos to upload to your PhotoFrame.</string>
-  <key>NSPhotoLibraryAddUsageDescription</key>
-  <string>Save uploaded photos to your library.</string>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Connect to your PhotoFrame on the local network.</string>
   <key>NSAppTransportSecurity</key>
