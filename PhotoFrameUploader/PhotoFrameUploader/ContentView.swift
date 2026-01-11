@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var isError: Bool = false
     @State private var isUploading: Bool = false
     @State private var displayNow: Bool = false
+    @State private var isPortrait: Bool = false
     @State private var albums: [AlbumItem] = []
     @AppStorage("photoframeAlbum") private var selectedAlbum: String = "Default"
     @State private var albumError: String?
@@ -125,18 +126,24 @@ struct ContentView: View {
             }
             .buttonStyle(.bordered)
             .tint(.orange)
+            .zIndex(1)
 
             if let image = selectedImage {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
-                    .frame(height: 220)
-                    .clipped()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: isPortrait ? 320 : 220)
                     .cornerRadius(16)
+                    .allowsHitTesting(false)
                 if !previewInfo.isEmpty {
                     Text(previewInfo)
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+                if isPortrait {
+                    Text("Warning: This photo is portrait. Please edit it to landscape in your iPhone library before uploading.")
+                        .font(.footnote)
+                        .foregroundColor(.red)
                 }
             }
         }
@@ -240,6 +247,7 @@ struct ContentView: View {
                 await MainActor.run {
                     selectedImage = normalized
                     previewInfo = "\(Int(normalized.size.width))x\(Int(normalized.size.height)) px"
+                    isPortrait = normalized.size.height > normalized.size.width
                     statusMessage = "Ready to upload."
                     isError = false
                 }
