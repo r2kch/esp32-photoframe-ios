@@ -1,12 +1,11 @@
 # PhotoFrameUploader iOS App for aitjcize/esp32-photoframe
 
-## Run on iPhone (free Apple ID)
-1. Open `PhotoFrameUploader/PhotoFrameUploader.xcodeproj` in Xcode.
-2. Select your iPhone as the run target.
-3. Xcode will prompt for signing; choose a free Apple ID.
-4. Click Run.
+PhotoFrameUploader is a minimalist iOS companion app for uploading photos to a Waveshare ESP32-S3-PhotoPainter running the `aitjcize/esp32-photoframe` firmware. It focuses on a frictionless flow: pick a photo, optionally display it immediately, and manage target albums from the device API.
 
-## Notes
-- Default album is `Default` and processing mode is `enhanced`.
-- The app uses HTTP to reach the device, so it includes an ATS exception and local network usage description.
-- If you change the device host, it is saved on-device.
+The app assumes the PhotoFrame firmware is already installed and connected to Wi-Fi. For firmware setup, flashing instructions, and device details, see the original repository:
+- https://github.com/aitjcize/esp32-photoframe
+
+## Screenshots
+
+![Photo selection and upload](img/app-1.png)
+![Album selection and display toggle](img/app-2.png)
