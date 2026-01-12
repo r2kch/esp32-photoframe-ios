@@ -6,6 +6,22 @@ struct UploadResponse: Decodable {
     let message: String?
 }
 
+struct DeviceConfig: Codable {
+    let rotate_interval: Int
+    let auto_rotate: Bool
+    let deep_sleep_enabled: Bool?
+    let brightness_fstop: Double?
+    let contrast: Double?
+}
+
+struct ConfigResponse: Decodable {
+    let rotate_interval: Int
+    let auto_rotate: Bool
+    let deep_sleep_enabled: Bool?
+    let brightness_fstop: Double?
+    let contrast: Double?
+}
+
 struct AlbumItem: Decodable {
     let name: String
     let enabled: Bool?
@@ -55,6 +71,96 @@ struct UploadService {
         }
         let decoder = JSONDecoder()
         return try decoder.decode([AlbumItem].self, from: data)
+    }
+
+    func fetchConfig(host: String) async throws -> ConfigResponse {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        let url = try makeURL(host: sanitizedHost, path: "/api/config")
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+            throw UploadError.network("Config request failed: HTTP \(httpResponse.statusCode)")
+        }
+        let decoder = JSONDecoder()
+        return try decoder.decode(ConfigResponse.self, from: data)
+    }
+
+    func updateConfig(host: String, config: DeviceConfig) async throws {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        let url = try makeURL(host: sanitizedHost, path: "/api/config")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(config)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let result = try decodeResponse(data, response: response)
+        guard result.status == "success" else {
+            throw UploadError.server(result.message ?? "Config update failed.")
+        }
+    }
+
+    func createAlbum(host: String, name: String) async throws {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        let url = try makeURL(host: sanitizedHost, path: "/api/albums")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["name": name])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let result = try decodeResponse(data, response: response)
+        guard result.status == "success" else {
+            throw UploadError.server(result.message ?? "Album creation failed.")
+        }
+    }
+
+    func setAlbumEnabled(host: String, name: String, enabled: Bool) async throws {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let url = try makeURL(host: sanitizedHost, path: "/api/albums/enabled?name=\(encoded)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["enabled": enabled])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let result = try decodeResponse(data, response: response)
+        guard result.status == "success" else {
+            throw UploadError.server(result.message ?? "Album update failed.")
+        }
+    }
+
+    func deleteAlbum(host: String, name: String) async throws {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let url = try makeURL(host: sanitizedHost, path: "/api/albums?name=\(encoded)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.timeoutInterval = 60
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let result = try decodeResponse(data, response: response)
+        guard result.status == "success" else {
+            throw UploadError.server(result.message ?? "Album delete failed.")
+        }
     }
 
     func fetchImages(host: String, album: String) async throws -> [ImageListItem] {

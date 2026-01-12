@@ -20,26 +20,44 @@ struct ContentView: View {
     @State private var albumList: [AlbumItem] = []
     @State private var albumListError: String?
     @State private var isAlbumListLoading: Bool = false
+    @State private var isCreateAlbumPresented: Bool = false
+    @State private var newAlbumName: String = ""
+    @State private var isCreatingAlbum: Bool = false
+    @State private var albumToDelete: AlbumItem?
+    @State private var showDeleteAlbumConfirm: Bool = false
+    @State private var rotationIntervalText: String = ""
+    @State private var rotationConfig: ConfigResponse?
+    @State private var rotationError: String?
+    @State private var isRotationLoading: Bool = false
+    @State private var isRotationSaving: Bool = false
 
     private let uploader = UploadService()
 
     var body: some View {
-        NavigationStack {
-            TabView {
+        TabView {
+            NavigationStack {
                 picturesTab
-                    .tabItem {
-                        Label("Pictures", systemImage: "camera")
-                    }
-                albumsTab
-                    .tabItem {
-                        Label("Album", systemImage: "rectangle.stack")
-                    }
-                settingsTab
-                    .tabItem {
-                        Label("Settings", systemImage: "gearshape")
-                    }
+                    .navigationTitle("PhotoFrame")
             }
-            .navigationTitle("PhotoFrame")
+            .tabItem {
+                Label("Pictures", systemImage: "camera")
+            }
+
+            NavigationStack {
+                albumsContent
+                    .navigationTitle("PhotoFrame")
+            }
+            .tabItem {
+                Label("Album", systemImage: "rectangle.stack")
+            }
+
+            NavigationStack {
+                settingsTab
+                    .navigationTitle("Settings")
+            }
+            .tabItem {
+                Label("Settings", systemImage: "gearshape")
+            }
         }
     }
 
@@ -61,48 +79,92 @@ struct ContentView: View {
         ScrollView {
             VStack(spacing: 18) {
                 deviceCard
+                rotationCard
                 aboutCard
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onAppear {
+            Task {
+                await loadRotationConfig()
+            }
+        }
     }
 
-    private var albumsTab: some View {
-        NavigationStack {
-            Group {
-                if isAlbumListLoading {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Loading albums...")
-                            .foregroundColor(.secondary)
+    private var albumsContent: some View {
+        Group {
+            if isAlbumListLoading {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading albums...")
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let albumListError {
+                VStack(spacing: 12) {
+                    Text(albumListError)
+                        .foregroundColor(.red)
+                    Button("Retry") {
+                        Task {
+                            await loadAlbumList()
+                        }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let albumListError {
-                    VStack(spacing: 12) {
-                        Text(albumListError)
-                            .foregroundColor(.red)
-                        Button("Retry") {
-                            Task {
-                                await loadAlbumList()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(albumList, id: \.name) { album in
+                    NavigationLink(album.name) {
+                        AlbumDetailView(album: album.name, host: host, uploader: uploader)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        if album.name != "Default" {
+                            Button(role: .destructive) {
+                                albumToDelete = album
+                                showDeleteAlbumConfirm = true
+                            } label: {
+                                Image(systemName: "trash")
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List(albumList, id: \.name) { album in
-                        NavigationLink(album.name) {
-                            AlbumDetailView(album: album.name, host: host, uploader: uploader)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button {
+                            newAlbumName = ""
+                            isCreateAlbumPresented = true
+                        } label: {
+                            Image(systemName: "plus")
                         }
                     }
                 }
             }
-            .navigationTitle("Albums")
-            .onAppear {
+        }
+        .onAppear {
+            Task {
+                await loadAlbumList()
+            }
+        }
+        .alert("New Album", isPresented: $isCreateAlbumPresented) {
+            TextField("Album name", text: $newAlbumName)
+            Button("Create") {
                 Task {
-                    await loadAlbumList()
+                    await createAlbum()
                 }
             }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enter a name for the new album.")
+        }
+        .alert("Delete Album", isPresented: $showDeleteAlbumConfirm) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    await deleteAlbum()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Delete this album and all its images? This cannot be undone.")
         }
     }
 
@@ -154,6 +216,43 @@ struct ContentView: View {
             Text("This app is provided “as is,” without warranties of any kind. Use at your own risk. Apple, aitjcize, and r2kch are not responsible for any device behavior, data loss, or damages arising from its use.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
+        }
+        .cardStyle()
+        .frame(maxWidth: .infinity)
+    }
+
+    private var rotationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rotation Interval")
+                .font(.headline)
+            Text("Automatic image rotation interval in seconds.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+            TextField("Seconds", text: $rotationIntervalText)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isRotationLoading)
+            Button {
+                Task {
+                    await updateRotationInterval()
+                }
+            } label: {
+                if isRotationSaving {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                } else {
+                    Text("Save Settings")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .disabled(isRotationLoading || isRotationSaving)
+            if let rotationError {
+                Text(rotationError)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+            }
         }
         .cardStyle()
         .frame(maxWidth: .infinity)
@@ -414,6 +513,126 @@ struct ContentView: View {
             await MainActor.run {
                 albumListError = "Could not load albums. \(error.localizedDescription)"
                 isAlbumListLoading = false
+            }
+        }
+    }
+
+    private func createAlbum() async {
+        if isCreatingAlbum {
+            return
+        }
+        let name = newAlbumName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            await MainActor.run {
+                albumListError = "Album name cannot be empty."
+            }
+            return
+        }
+        await MainActor.run {
+            isCreatingAlbum = true
+        }
+        do {
+            try await uploader.createAlbum(host: host, name: name)
+            try await uploader.setAlbumEnabled(host: host, name: name, enabled: true)
+            await MainActor.run {
+                isCreatingAlbum = false
+                isCreateAlbumPresented = false
+            }
+            await loadAlbumList()
+        } catch {
+            await MainActor.run {
+                albumListError = "Could not create album. \(error.localizedDescription)"
+                isCreatingAlbum = false
+            }
+        }
+    }
+
+    private func deleteAlbum() async {
+        guard let album = albumToDelete else {
+            return
+        }
+        if album.name == "Default" {
+            await MainActor.run {
+                albumListError = "The Default album cannot be deleted."
+            }
+            return
+        }
+        await MainActor.run {
+            albumListError = nil
+        }
+        do {
+            try await uploader.deleteAlbum(host: host, name: album.name)
+            await MainActor.run {
+                albumToDelete = nil
+                showDeleteAlbumConfirm = false
+            }
+            await loadAlbumList()
+        } catch {
+            await MainActor.run {
+                albumListError = "Could not delete album. \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func loadRotationConfig() async {
+        if isRotationLoading {
+            return
+        }
+        await MainActor.run {
+            isRotationLoading = true
+            rotationError = nil
+        }
+        do {
+            let config = try await uploader.fetchConfig(host: host)
+            await MainActor.run {
+                rotationConfig = config
+                rotationIntervalText = String(config.rotate_interval)
+                isRotationLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                rotationError = "Could not load rotation interval. \(error.localizedDescription)"
+                isRotationLoading = false
+            }
+        }
+    }
+
+    private func updateRotationInterval() async {
+        guard let currentConfig = rotationConfig else {
+            return
+        }
+        let trimmed = rotationIntervalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let interval = Int(trimmed) else {
+            rotationError = "Rotation interval must be a number."
+            return
+        }
+        let payload = DeviceConfig(
+            rotate_interval: interval,
+            auto_rotate: currentConfig.auto_rotate,
+            deep_sleep_enabled: currentConfig.deep_sleep_enabled,
+            brightness_fstop: currentConfig.brightness_fstop,
+            contrast: currentConfig.contrast
+        )
+        do {
+            await MainActor.run {
+                isRotationSaving = true
+            }
+            try await uploader.updateConfig(host: host, config: payload)
+            await MainActor.run {
+                rotationError = nil
+                rotationConfig = ConfigResponse(
+                    rotate_interval: interval,
+                    auto_rotate: currentConfig.auto_rotate,
+                    deep_sleep_enabled: currentConfig.deep_sleep_enabled,
+                    brightness_fstop: currentConfig.brightness_fstop,
+                    contrast: currentConfig.contrast
+                )
+                isRotationSaving = false
+            }
+        } catch {
+            await MainActor.run {
+                rotationError = "Could not update rotation interval. \(error.localizedDescription)"
+                isRotationSaving = false
             }
         }
     }
