@@ -47,7 +47,7 @@
   <string>Connect to your PhotoFrame on the local network.</string>
   <key>NSAppTransportSecurity</key>
   <dict>
-    <key>NSAllowsArbitraryLoads</key>
+    <key>NSAllowsArbitraryLoadsInLocalNetwork</key>
     <true/>
   </dict>
 </dict>

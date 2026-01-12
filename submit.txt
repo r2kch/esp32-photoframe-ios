@@ -1,0 +1,51 @@
+App Name:
+PhotoFrameUploader
+
+Subtitle:
+Upload photos to your local PhotoFrame
+
+Keywords:
+photoframe,photo frame,esp32,epaper,waveshare,local network,photo uploader
+
+Description:
+PhotoFrameUploader is a minimalist companion app for uploading photos to a Waveshare ESP32-S3-PhotoPainter running the aitjcize/esp32-photoframe firmware. Pick a photo, upload it to your PhotoFrame, and optionally display it immediately. Albums can be browsed, created, and managed directly from the device.
+
+The PhotoFrame must be on the same Wi-Fi network. The app connects only to the local device and does not send data to external servers.
+
+Support URL:
+https://example.com/support
+
+Marketing URL (optional):
+https://example.com
+
+Privacy Policy URL:
+https://example.com/privacy
+
+App Review Notes:
+This app connects to a local ESP32 PhotoFrame on the same Wi-Fi network. The firmware only supports HTTP (no HTTPS), so ATS local network exceptions are required. The app does not transmit data to external servers.
+
+App Store Privacy (Data Types Used):
+- Photos (User Content) — used to select photos for upload to the local PhotoFrame device.
+- Local Network — required to discover and connect to the PhotoFrame on the same Wi-Fi network.
+
+App Store Privacy (Data Not Collected):
+- No tracking
+- No analytics
+- No identifiers
+
+Test Account (if required):
+Not required.
+
+iOS Device Support:
+- iPhone only (iPad support planned later)
+
+ATS / Networking:
+- NSAllowsArbitraryLoadsInLocalNetwork = true
+- HTTP required due to device firmware limitation
+
+MISSING THINGS:
+- Real URLs for Support, Marketing, and Privacy Policy.
+- App Store screenshots (required sizes).
+- App Store Connect privacy questionnaire completion.
+- Paid Apple Developer account + provisioning for App Store submission.
+- Final review of keywords/subtitle/description wording.
