@@ -17,15 +17,22 @@ struct ContentView: View {
     @State private var albumError: String?
     @State private var isLoadingAlbums: Bool = false
     @State private var isAlbumPickerPresented: Bool = false
+    @State private var albumList: [AlbumItem] = []
+    @State private var albumListError: String?
+    @State private var isAlbumListLoading: Bool = false
 
     private let uploader = UploadService()
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             TabView {
                 picturesTab
                     .tabItem {
                         Label("Pictures", systemImage: "camera")
+                    }
+                albumsTab
+                    .tabItem {
+                        Label("Album", systemImage: "rectangle.stack")
                     }
                 settingsTab
                     .tabItem {
@@ -58,6 +65,44 @@ struct ContentView: View {
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var albumsTab: some View {
+        NavigationStack {
+            Group {
+                if isAlbumListLoading {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Loading albums...")
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let albumListError {
+                    VStack(spacing: 12) {
+                        Text(albumListError)
+                            .foregroundColor(.red)
+                        Button("Retry") {
+                            Task {
+                                await loadAlbumList()
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(albumList, id: \.name) { album in
+                        NavigationLink(album.name) {
+                            AlbumDetailView(album: album.name, host: host, uploader: uploader)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Albums")
+            .onAppear {
+                Task {
+                    await loadAlbumList()
+                }
+            }
         }
     }
 
@@ -349,6 +394,239 @@ struct ContentView: View {
             return [AlbumItem(name: "Default", enabled: nil)]
         }
         return albums
+    }
+
+    private func loadAlbumList() async {
+        if isAlbumListLoading {
+            return
+        }
+        await MainActor.run {
+            isAlbumListLoading = true
+            albumListError = nil
+        }
+        do {
+            let fetched = try await uploader.fetchAlbums(host: host)
+            await MainActor.run {
+                albumList = fetched
+                isAlbumListLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                albumListError = "Could not load albums. \(error.localizedDescription)"
+                isAlbumListLoading = false
+            }
+        }
+    }
+}
+
+private struct AlbumDetailView: View {
+    let album: String
+    let host: String
+    let uploader: UploadService
+
+    @State private var images: [ImageListItem] = []
+    @State private var isLoading: Bool = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if isLoading {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading images...")
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let errorMessage {
+                VStack(spacing: 12) {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                    Button("Retry") {
+                        Task {
+                            await loadImages()
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(images, id: \.name) { image in
+                            AlbumImageRow(
+                                album: album,
+                                filename: image.name,
+                                host: host,
+                                uploader: uploader,
+                                onDelete: {
+                                    images.removeAll { $0.name == image.name }
+                                }
+                            )
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+        }
+        .navigationTitle(album)
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            Task {
+                await loadImages()
+            }
+        }
+    }
+
+    private func loadImages() async {
+        if isLoading {
+            return
+        }
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        do {
+            let fetched = try await uploader.fetchImages(host: host, album: album)
+            await MainActor.run {
+                images = fetched.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Could not load images. \(error.localizedDescription)"
+                isLoading = false
+            }
+        }
+    }
+}
+
+private struct AlbumImageRow: View {
+    let album: String
+    let filename: String
+    let host: String
+    let uploader: UploadService
+    let onDelete: () -> Void
+
+    @State private var isWorking: Bool = false
+    @State private var showError: Bool = false
+    @State private var showDeleteConfirm: Bool = false
+    @State private var errorMessage: String = ""
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AsyncImage(url: thumbnailURL) { phase in
+                switch phase {
+                case .empty:
+                    placeholder
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .failure:
+                    placeholder
+                @unknown default:
+                    placeholder
+                }
+            }
+            .frame(height: 70)
+            .frame(maxWidth: .infinity)
+            .clipped()
+            .cornerRadius(12)
+            .layoutPriority(2)
+
+            Button {
+                Task {
+                    await display()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "camera")
+                    Image(systemName: "bolt.fill")
+                    Text("Display")
+                        .font(.headline)
+                }
+                .foregroundColor(.white)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity)
+            }
+            .background(Color(red: 0.52, green: 0.33, blue: 0.88))
+            .cornerRadius(16)
+            .frame(maxWidth: .infinity)
+            .layoutPriority(3)
+            .disabled(isWorking)
+
+            Button {
+                showDeleteConfirm = true
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundColor(.white)
+                    .frame(width: 44, height: 44)
+            }
+            .background(Color.red)
+            .clipShape(Circle())
+            .layoutPriority(0)
+            .disabled(isWorking)
+            .confirmationDialog("Delete this image?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    Task {
+                        await delete()
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .alert("Action failed", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage)
+        }
+    }
+
+    private var thumbnailURL: URL? {
+        let path = "/api/image?name=\(album)/\(filename)"
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        return URL(string: "http://\(host)\(encoded)")
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Color(.systemGray5)
+            Image(systemName: "photo")
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func display() async {
+        if isWorking { return }
+        await MainActor.run { isWorking = true }
+        do {
+            try await uploader.displayImage(host: host, album: album, filename: filename)
+            await MainActor.run { isWorking = false }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                showError = true
+                isWorking = false
+            }
+        }
+    }
+
+    private func delete() async {
+        if isWorking { return }
+        await MainActor.run { isWorking = true }
+        do {
+            try await uploader.deleteImage(host: host, album: album, filename: filename)
+            await MainActor.run {
+                isWorking = false
+                onDelete()
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                showError = true
+                isWorking = false
+            }
+        }
     }
 }
 

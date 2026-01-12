@@ -57,6 +57,54 @@ struct UploadService {
         return try decoder.decode([AlbumItem].self, from: data)
     }
 
+    func fetchImages(host: String, album: String) async throws -> [ImageListItem] {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        return try await listImages(host: sanitizedHost, album: album)
+    }
+
+    func displayImage(host: String, album: String, filename: String) async throws {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        let displayURL = try makeURL(host: sanitizedHost, path: "/api/display")
+        var request = URLRequest(url: displayURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 90
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = ["filename": "\(album)/\(filename)"]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let result = try decodeResponse(data, response: response)
+        guard result.status == "success" else {
+            throw UploadError.server(result.message ?? "Display failed.")
+        }
+    }
+
+    func deleteImage(host: String, album: String, filename: String) async throws {
+        let sanitizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitizedHost.isEmpty else {
+            throw UploadError.invalidHost
+        }
+        let deleteURL = try makeURL(host: sanitizedHost, path: "/api/delete")
+        var request = URLRequest(url: deleteURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = ["filename": "\(album)/\(filename)"]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let result = try decodeResponse(data, response: response)
+        guard result.status == "success" else {
+            throw UploadError.server(result.message ?? "Delete failed.")
+        }
+    }
+
     func upload(
         host: String,
         album: String,
