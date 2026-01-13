@@ -12,6 +12,8 @@ struct ContentView: View {
     @State private var isUploading: Bool = false
     @State private var displayNow: Bool = false
     @State private var isPortrait: Bool = false
+    @State private var optimizedImage: UIImage?
+    @State private var showOptimizer: Bool = false
     @State private var albums: [AlbumItem] = []
     @AppStorage("photoframeAlbum") private var selectedAlbum: String = "Default"
     @State private var albumError: String?
@@ -272,7 +274,7 @@ struct ContentView: View {
             .tint(.orange)
             .zIndex(1)
 
-            if let image = selectedImage {
+            if let image = optimizedImage ?? selectedImage {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFit()
@@ -289,6 +291,15 @@ struct ContentView: View {
                         .font(.footnote)
                         .foregroundColor(.red)
                 }
+                Button {
+                    showOptimizer = true
+                } label: {
+                    Text(optimizedImage == nil ? "Optimize Image" : "Optimize Image (Applied)")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(red: 0.62, green: 0.85, blue: 0.56))
+                .disabled(selectedImage == nil)
             }
         }
         .cardStyle()
@@ -297,6 +308,15 @@ struct ContentView: View {
             guard let newValue else { return }
             Task {
                 await loadImage(from: newValue)
+            }
+        }
+        .sheet(isPresented: $showOptimizer) {
+            if let image = selectedImage {
+                OptimizeImageView(sourceImage: image) { optimized in
+                    optimizedImage = optimized
+                }
+            } else {
+                Text("No image selected.")
             }
         }
     }
@@ -390,6 +410,7 @@ struct ContentView: View {
                 let normalized = ImageProcessor.normalized(image)
                 await MainActor.run {
                     selectedImage = normalized
+                    optimizedImage = nil
                     previewInfo = "\(Int(normalized.size.width))x\(Int(normalized.size.height)) px"
                     isPortrait = normalized.size.height > normalized.size.width
                     statusMessage = "Ready to upload."
@@ -415,6 +436,7 @@ struct ContentView: View {
             isError = true
             return
         }
+        let imageToUpload = optimizedImage ?? image
 
         await MainActor.run {
             isUploading = true
@@ -423,7 +445,7 @@ struct ContentView: View {
         }
 
         do {
-            let payload = try ImageProcessor.buildPayload(from: image)
+            let payload = try ImageProcessor.buildPayload(from: imageToUpload)
             await MainActor.run {
                 statusMessage = "Uploading..."
             }
@@ -846,6 +868,183 @@ private struct AlbumImageRow: View {
                 isWorking = false
             }
         }
+    }
+}
+
+private struct OptimizeImageView: View {
+    let sourceImage: UIImage
+    let onConfirm: (UIImage) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var params = ImageOptimizeParams.defaults
+    @State private var previewImage: UIImage?
+    @State private var isProcessing: Bool = false
+    @State private var errorMessage: String?
+    @State private var previewTask: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    previewSection
+                    processingSection
+                }
+                .padding(16)
+            }
+            .navigationTitle("Optimize Image")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Confirm") {
+                        Task {
+                            await confirmOptimization()
+                        }
+                    }
+                    .disabled(isProcessing)
+                }
+            }
+            .onAppear {
+                schedulePreviewUpdate()
+            }
+            .onChange(of: params) { _ in
+                schedulePreviewUpdate()
+            }
+        }
+    }
+
+    private var previewSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Preview")
+                .font(.headline)
+            ZStack {
+                if let previewImage {
+                    Image(uiImage: previewImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .cornerRadius(12)
+                } else {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 180)
+                }
+                if isProcessing {
+                    ProgressView()
+                }
+            }
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.footnote)
+                    .foregroundColor(.red)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var processingSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Settings")
+                .font(.headline)
+
+            Picker("Processing Mode", selection: $params.processingMode) {
+                ForEach(ImageOptimizeParams.ProcessingMode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Picker("Tone Mode", selection: $params.toneMode) {
+                ForEach(ImageOptimizeParams.ToneMode.allCases, id: \.self) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(params.processingMode == .stock)
+
+            sliderRow(title: "Exposure", value: $params.exposure, range: 0.5...2.0, step: 0.1)
+            sliderRow(title: "Saturation", value: $params.saturation, range: 0.5...2.0, step: 0.1)
+
+            if params.toneMode == .contrast {
+                sliderRow(title: "Contrast", value: $params.contrast, range: 0.5...2.0, step: 0.1)
+            } else {
+                sliderRow(title: "Strength", value: $params.strength, range: 0.0...1.0, step: 0.05)
+                sliderRow(title: "Shadow Boost", value: $params.shadowBoost, range: 0.0...2.0, step: 0.1)
+                sliderRow(title: "Highlight Compress", value: $params.highlightCompress, range: 0.5...2.5, step: 0.1)
+                sliderRow(title: "Midpoint", value: $params.midpoint, range: 0.2...0.8, step: 0.05)
+            }
+
+            Picker("Color Method", selection: $params.colorMethod) {
+                ForEach(ImageOptimizeParams.ColorMethod.allCases, id: \.self) { method in
+                    Text(method.title).tag(method)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Toggle("Render Measured Palette", isOn: $params.renderMeasured)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func sliderRow(title: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(String(format: "%.2f", value.wrappedValue))
+                    .foregroundColor(.secondary)
+                    .font(.footnote)
+            }
+            Slider(value: value, in: range, step: step)
+        }
+    }
+
+    private func schedulePreviewUpdate() {
+        previewTask?.cancel()
+        let paramsCopy = params
+        let target = OptimizeImageView.previewTargetSize(for: sourceImage)
+        previewTask = Task.detached(priority: .userInitiated) {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            let image = ImageOptimizer.process(image: sourceImage, targetSize: target, params: paramsCopy)
+            await MainActor.run {
+                previewImage = image
+                errorMessage = image == nil ? "Preview generation failed." : nil
+            }
+        }
+    }
+
+    private func confirmOptimization() async {
+        let paramsCopy = params
+        await MainActor.run { isProcessing = true }
+        let target = OptimizeImageView.fullTargetSize(for: sourceImage)
+        let image = await Task.detached(priority: .userInitiated) {
+            ImageOptimizer.process(image: sourceImage, targetSize: target, params: paramsCopy)
+        }.value
+        await MainActor.run {
+            isProcessing = false
+        }
+        guard let image else {
+            await MainActor.run {
+                errorMessage = "Optimization failed."
+            }
+            return
+        }
+        onConfirm(image)
+        dismiss()
+    }
+
+    private static func fullTargetSize(for image: UIImage) -> CGSize {
+        let isPortrait = image.size.height > image.size.width
+        return isPortrait ? CGSize(width: 480, height: 800) : CGSize(width: 800, height: 480)
+    }
+
+    private static func previewTargetSize(for image: UIImage) -> CGSize {
+        let full = fullTargetSize(for: image)
+        let scale: CGFloat = 0.4
+        return CGSize(width: full.width * scale, height: full.height * scale)
     }
 }
 
