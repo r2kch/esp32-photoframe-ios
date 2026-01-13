@@ -965,6 +965,15 @@ private struct OptimizeImageView: View {
             .pickerStyle(.segmented)
             .disabled(params.processingMode == .stock)
 
+            Button {
+                params = .defaults
+            } label: {
+                Text("Reset to Defaults")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color(red: 1.0, green: 0.6, blue: 0.6))
+
             sliderRow(title: "Exposure", value: $params.exposure, range: 0.5...2.0, step: 0.1)
             sliderRow(title: "Saturation", value: $params.saturation, range: 0.5...2.0, step: 0.1)
 
