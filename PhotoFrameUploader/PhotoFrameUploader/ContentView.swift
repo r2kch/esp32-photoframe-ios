@@ -32,6 +32,9 @@ struct ContentView: View {
     @State private var rotationError: String?
     @State private var isRotationLoading: Bool = false
     @State private var isRotationSaving: Bool = false
+    @State private var rotationMode: String = "sdcard"
+    @State private var rotationUrlText: String = ""
+    @State private var rotationUrlSuffix: String = ""
 
     private let uploader = UploadService()
 
@@ -86,11 +89,6 @@ struct ContentView: View {
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .onAppear {
-            Task {
-                await loadRotationConfig()
-            }
         }
     }
 
@@ -189,6 +187,23 @@ struct ContentView: View {
                 .textInputAutocapitalization(.never)
                 .keyboardType(.URL)
                 .textFieldStyle(.roundedBorder)
+            Button {
+                Task {
+                    await loadRotationConfig()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if isRotationLoading {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                    }
+                    Text("Load device data")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .disabled(isRotationLoading)
         }
         .cardStyle()
     }
@@ -234,6 +249,29 @@ struct ContentView: View {
                 .keyboardType(.numberPad)
                 .textFieldStyle(.roundedBorder)
                 .disabled(isRotationLoading)
+            Text("Image Rotation Source")
+                .font(.headline)
+            Picker("Image Rotation Source", selection: $rotationMode) {
+                Text("SDCard").tag("sdcard")
+                Text("URL").tag("url")
+            }
+            .pickerStyle(.segmented)
+            if rotationMode == "url" {
+                HStack(spacing: 8) {
+                    Text("https://")
+                        .foregroundColor(.secondary)
+                    TextField("example.com/path", text: $rotationUrlSuffix)
+                        .textFieldStyle(.roundedBorder)
+                        .autocapitalization(.none)
+                        .onChange(of: rotationUrlSuffix) { newValue in
+                            let lowercased = newValue.lowercased()
+                            if lowercased != newValue {
+                                rotationUrlSuffix = lowercased
+                            }
+                            rotationUrlText = buildRotationUrl(from: lowercased)
+                        }
+                }
+            }
             Button {
                 Task {
                     await updateRotationInterval()
@@ -609,6 +647,9 @@ struct ContentView: View {
             await MainActor.run {
                 rotationConfig = config
                 rotationIntervalText = String(config.rotate_interval)
+                rotationMode = (config.rotation_mode ?? "sdcard").lowercased()
+                rotationUrlText = config.image_url ?? ""
+                rotationUrlSuffix = stripUrlPrefix(rotationUrlText)
                 isRotationLoading = false
             }
         } catch {
@@ -632,6 +673,8 @@ struct ContentView: View {
             rotate_interval: interval,
             auto_rotate: currentConfig.auto_rotate,
             deep_sleep_enabled: currentConfig.deep_sleep_enabled,
+            image_url: rotationMode == "url" ? buildRotationUrl(from: rotationUrlSuffix) : rotationUrlText,
+            rotation_mode: rotationMode,
             brightness_fstop: currentConfig.brightness_fstop,
             contrast: currentConfig.contrast
         )
@@ -646,6 +689,8 @@ struct ContentView: View {
                     rotate_interval: interval,
                     auto_rotate: currentConfig.auto_rotate,
                     deep_sleep_enabled: currentConfig.deep_sleep_enabled,
+                    image_url: rotationMode == "url" ? buildRotationUrl(from: rotationUrlSuffix) : rotationUrlText,
+                    rotation_mode: rotationMode,
                     brightness_fstop: currentConfig.brightness_fstop,
                     contrast: currentConfig.contrast
                 )
@@ -657,6 +702,25 @@ struct ContentView: View {
                 isRotationSaving = false
             }
         }
+    }
+
+    private func stripUrlPrefix(_ value: String) -> String {
+        let lower = value.lowercased()
+        if lower.hasPrefix("https://") {
+            return String(value.dropFirst("https://".count))
+        }
+        if lower.hasPrefix("http://") {
+            return String(value.dropFirst("http://".count))
+        }
+        return value
+    }
+
+    private func buildRotationUrl(from suffix: String) -> String {
+        let trimmed = suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return ""
+        }
+        return "https://\(trimmed)"
     }
 }
 

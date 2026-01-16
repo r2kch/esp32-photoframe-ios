@@ -10,6 +10,8 @@ struct DeviceConfig: Codable {
     let rotate_interval: Int
     let auto_rotate: Bool
     let deep_sleep_enabled: Bool?
+    let image_url: String?
+    let rotation_mode: String?
     let brightness_fstop: Double?
     let contrast: Double?
 }
@@ -18,6 +20,8 @@ struct ConfigResponse: Decodable {
     let rotate_interval: Int
     let auto_rotate: Bool
     let deep_sleep_enabled: Bool?
+    let image_url: String?
+    let rotation_mode: String?
     let brightness_fstop: Double?
     let contrast: Double?
 }
